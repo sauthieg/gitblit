@@ -29,6 +29,7 @@ import org.eclipse.jgit.diff.RawTextComparator;
 import org.eclipse.jgit.diff.DiffEntry.ChangeType;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.IndexDiff;
+import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.lib.Config
 import org.eclipse.jgit.patch.FileHeader;
@@ -132,17 +133,24 @@ toAddresses.addAll(repository.mailingLists)
 def repo = repository.name
 def summaryUrl = url + "/summary?r=$repo"
 def baseCommitUrl = url + "/commit?r=$repo&h="
+def baseBlobDiffUrl = url + "/blobdiff/?r=$repo&h="
+def baseCommitDiffUrl = url + "/commitdiff/?r=$repo&h="
 
 if (gitblit.getBoolean(Keys.web.mountParameters, true)) {
 	repo = repo.replace('/', gitblit.getString(Keys.web.forwardSlashCharacter, '/')).replace('/', '%2F')
 	summaryUrl = url + "/summary/$repo"
 	baseCommitUrl = url + "/commit/$repo/"
+	baseBlobDiffUrl = url + "/blobdiff/$repo/"
+	baseCommitDiffUrl = url + "/commitdiff/$repo/"
 }
 
 class HtmlMailWriter {
 	Repository repository
 	def url
 	def baseCommitUrl
+	def baseCommitDiffUrl
+	def baseBlobDiffUrl
+	def mountParameters
 	def commitCount = 0
 	def commands
 	def writer = new StringWriter();
@@ -259,6 +267,24 @@ class HtmlMailWriter {
 		"${baseCommitUrl}$commit.id.name"
 	}
 	
+	def commitDiffUrl(RevCommit commit) {
+		"${baseCommitDiffUrl}$commit.id.name"
+	}
+	
+	def encoded(String path) {
+		path.replace('/', '!')
+	}
+	
+	def blobDiffUrl(objectId, path) {
+		if (mountParameters) {
+			// REST style
+			"${baseBlobDiffUrl}${objectId.name()}/${encoded(path)}"
+		} else {
+		    "${baseBlobDiffUrl}${objectId.name()}&f=${path}"
+		}
+		
+	}
+	
 	def writeCommitTable(commits) {
 		// Write commits table
 		builder.table('class':"commits-table") {
@@ -302,7 +328,10 @@ class HtmlMailWriter {
 					span('class':"label-commit",  abbreviated )
 				}
 			}
-			td ( message )
+			td {
+				mkp.yield message
+				a(href:commitDiffUrl(commit), " [commitdiff]" )
+			}
 		}
 	}
 	
@@ -312,7 +341,9 @@ class HtmlMailWriter {
 	
 	def writeAddStatusLine(FileHeader header) {
 		builder.td('class':"status-column") {
-			writeStatusLabel("label-add", "add")
+			a(href:blobDiffUrl(header.newId, header.newPath)) {
+				writeStatusLabel("label-add", "add")
+			}
 		}
 		builder.td {
 			span(style:'font-family: monospace;', header.newPath)
@@ -320,8 +351,10 @@ class HtmlMailWriter {
 	}
 	
 	def writeCopyStatusLine(FileHeader header) {
-		builder.td(style:"width:10%") {
-			writeStatusLabel("label-copy", "copy")
+		builder.td('class':"status-column") {
+			a(href:blobDiffUrl(header.newId, header.newPath)) {
+			    writeStatusLabel("label-copy", "copy")
+			}
 		}
 		builder.td() {
 			span(style : "font-family: monospace; ", header.oldPath + " copied to " + header.newPath)
@@ -329,8 +362,10 @@ class HtmlMailWriter {
 	}
 	
 	def writeDeleteStatusLine(FileHeader header) {
-		builder.td(style:"width:10%") {
-			writeStatusLabel("label-delete", "delete")
+		builder.td('class':"status-column") {
+			a(href:blobDiffUrl(header.newId, header.oldPath)) {
+				writeStatusLabel("label-delete", "delete")
+			}
 		}
 		builder.td() {
 			span(style : "font-family: monospace; ", header.oldPath)
@@ -338,8 +373,10 @@ class HtmlMailWriter {
 	}
 	
 	def writeModifyStatusLine(FileHeader header) {
-		builder.td(style:"width:10%") {
-			writeStatusLabel("label-modify", "modify")
+		builder.td('class':"status-column") {
+			a(href:blobDiffUrl(header.newId, header.oldPath)) {
+				writeStatusLabel("label-modify", "modify")
+			}
 		}
 		builder.td() {
 			span(style : "font-family: monospace; ", header.oldPath)
@@ -347,8 +384,10 @@ class HtmlMailWriter {
 	}
 
 	def writeRenameStatusLine(FileHeader header) {
-		builder.td(style:"width:10%") {
-			writeStatusLabel("label-rename", "rename")
+		builder.td('class':"status-column") {
+			a(href:blobDiffUrl(header.newId, header.newPath)) {
+				writeStatusLabel("label-rename", "rename")
+			}
 		}
 		builder.td() {
 			span(style : "font-family: monospace; ", header.olPath + " -> " + header.newPath)
@@ -380,12 +419,6 @@ class HtmlMailWriter {
 	def writeStatusTable(RevCommit commit) {
 		// Write status table
 		builder.table('class':"commits-table") {
-			thead {
-				tr {
-					th( "Status" )
-					th( "Path" )
-				}
-			}
 			tbody() {
 				DiffFormatter formatter = new DiffFormatter(DisabledOutputStream.INSTANCE)
 				formatter.setRepository(repository)
@@ -504,8 +537,11 @@ def df = new SimpleDateFormat(gitblit.getString(Keys.web.datetimestampLongFormat
 def mailWriter = new HtmlMailWriter()
 mailWriter.repository = r
 mailWriter.baseCommitUrl = baseCommitUrl
+mailWriter.baseBlobDiffUrl = baseBlobDiffUrl
+mailWriter.baseCommitDiffUrl = baseCommitDiffUrl
 mailWriter.commands = commands
 mailWriter.url = url
+mailWriter.mountParameters = gitblit.getBoolean(Keys.web.mountParameters, true)
 
 def content = mailWriter.write()
 
